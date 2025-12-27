@@ -1,5 +1,8 @@
 -- TODO:
 -- Implement PC UART
+-- 检查几条通路：按B键会发生什么（已经检查）
+-- 按A键会发生什么
+-- 长按A键会发生什么
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -54,16 +57,16 @@ architecture bhav of music is
     ----------------------------------------------------------------
     -- Button signals (active low on board): key2=A, key3=B, key4=C
     ----------------------------------------------------------------
-    signal keyA_raw, keyB_raw, keyC_raw : std_logic;
+    signal keyA_raw, keyB_raw, keyC_raw : std_logic; -- fpga  的输入管脚
     -- simple synchronised versions
-    signal keyA_sync, keyB_sync, keyC_sync : std_logic;
-    signal keyA_prev, keyB_prev, keyC_prev : std_logic;
+    signal keyA_sync, keyB_sync, keyC_sync : std_logic; -- 与时钟时序同步后的信号
+    signal keyA_prev, keyB_prev, keyC_prev : std_logic; -- 上一时钟周期的同步信号，用来找到上升沿和下降沿
 
     -- long-press detection for A
-    signal keyA_press_cnt : unsigned(23 downto 0);  -- adjust width for time
+    signal keyA_press_cnt : unsigned(23 downto 0);  -- adjust width for time。此处按下来超过0.5秒就认为是长按
     signal keyA_long      : std_logic;
     signal keyA_event     : std_logic;  -- one-clock pulse when press released
-    signal keyA_long_mode : std_logic;  -- 1 = continuous mode
+    signal keyA_long_mode : std_logic;  -- 1 = continuous mode，激活连续测量
 
     -- calibration flags
     signal calib_req_50 : std_logic; -- 此处是校准请求信号，即将距离设置为50cm后下令我们开始校准
@@ -246,7 +249,7 @@ begin
 
                 -- On B/C press, request calibration on next frame
                 if B_press = '1' then
-                    calib_req_50 <= '1';
+                    calib_req_50 <= '1'; -- 我们在标定B
                 end if;
                 if C_press = '1' then
                     calib_req_100 <= '1';
@@ -269,6 +272,8 @@ begin
 
     ----------------------------------------------------------------
     -- Distance computation: distance = k_const / (laser_center - a_const)
+    -- 计算距离，里面有“固定小数点”的处理
+    -- 注：固定点小数会除掉，这样做只是为了k和a的精度可以设置得更好
     ----------------------------------------------------------------
     process(clk)
         -- 使用 integer 做中间计算, 更方便除法
@@ -281,7 +286,7 @@ begin
             if reset = '1' then
                 distance_value <= (others => '0');
             else
-                lc_int := to_integer(laser_center);  -- 0..4095
+                lc_int := to_integer(laser_center);  -- 0 to 4095
                 denom_int := (lc_int * (2 ** SCALE_BITS)) - a_const_int;
 
                 if denom_int <= 0 then
@@ -307,6 +312,7 @@ begin
     ----------------------------------------------------------------
 
     led_value <= resize(laser_center, 16) when show_raw_mode = '1' else distance_value;
+    -- yifan 注意在按下BC时，显示的是laser_center，否则显示distance_value
 
     my_segment_led: entity work.segment_led
         port map(
