@@ -12,6 +12,8 @@ use ieee.numeric_std.all;
 	 -- 该上升沿会在接收完全部数据后产生。由于laser_center的值是实时更新，
 	 -- 而CCD返回数据存在帧尾，故该上升沿在laser_center改变后一定时间产生。
 	 -- 高电平持续约1us后回到低电平.
+--yifan: 但是没有实现，也许要改
+
 entity CCD_interactor is
 	port(
 		clk: in std_logic;
@@ -217,6 +219,27 @@ begin
 			end if;
 		end if;
 	end process;
+
+
+
+	-- yifan: 考虑加上
+	-- process(clk) -- 大状态转移
+    -- begin
+    --     if (clk'event and clk='1') then
+    --         -- ...existing code...
+            
+    --         -- Add this logic to drive frame_refreshed
+    --         frame_refreshed <= '0'; -- Default low
+            
+    --         if receiving='1' then
+    --             if cnt_timeout=x"FFFFF" or cnt_r=7301 then
+    --                 receiving<='0';
+    --                 frame_refreshed <= '1'; -- Pulse high when reception finishes
+    --             end if;
+    --         end if;
+            
+    --     end if;
+    -- end process;
 	
 
 end architecture;

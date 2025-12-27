@@ -1,3 +1,6 @@
+-- TODO:
+-- Implement PC UART
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -37,14 +40,16 @@ architecture bhav of music is
     ----------------------------------------------------------------
     -- Distance value for display and PC output
     ----------------------------------------------------------------
+    signal show_raw_mode  : std_logic; -- 1=Show Laser Center, 0=Show Distance
+    signal led_value      : unsigned(15 downto 0);
     signal distance_value : unsigned(15 downto 0);
 
     -- fixed-point parameters
     constant SCALE_BITS : integer := 10;  -- 2^10 = 1024
 
-    -- YOU set these based on optics:
+    -- 需要设计的常数
     constant a_const_int : integer := 102400;    -- = a_real * 2^SCALE_BITS
-    constant k_const_int : integer := 512000;  -- = k_real * 2^SCALE_BITS -- 瞎写的，ai建议51200000 起始
+    constant k_const_int : integer := 16;  -- = k_real * 2^SCALE_BITS -- 瞎写的，ai建议51200000 起始？？
 
     ----------------------------------------------------------------
     -- Button signals (active low on board): key2=A, key3=B, key4=C
@@ -163,8 +168,8 @@ begin
     C_press   <= '1' when (keyC_prev = '1' and keyC_sync = '0') else '0';
 
     ----------------------------------------------------------------
-    -- Long-press detection for A; toggle continuous mode
-    -- Example: at 50 MHz, 0.5 s ~ 25,000,000 cycles.
+    -- Button A Logic & Single Measure Generation
+    -- Combined to fix race conditions and logic conflicts
     ----------------------------------------------------------------
     process(clk)
     begin
@@ -172,71 +177,54 @@ begin
             if reset = '1' then
                 keyA_press_cnt <= (others => '0');
                 keyA_long      <= '0';
-                keyA_event     <= '0';
                 keyA_long_mode <= '0';
+                single_measure <= '0';
+                continuous_measure <= '0';
+                show_raw_mode  <= '0'; -- Default to distance
             else
-                keyA_event <= '0';
+                -- Default auto-reset signals
+                single_measure <= '0';
 
+                -- 1. Handle Button A Press/Release
                 if keyA_sync = '0' then  -- pressed
-                    if keyA_press_cnt /= to_unsigned(2**keyA_press_cnt'length - 1, keyA_press_cnt'length) then
+                    if keyA_press_cnt /= x"FFFFFF" then -- Prevent wrap around
                         keyA_press_cnt <= keyA_press_cnt + 1;
                     end if;
-                    -- Set long flag if count exceeds threshold
-                    if keyA_press_cnt = to_unsigned(25_000_000, keyA_press_cnt'length) then
+                    -- Threshold for long press (approx 0.5s at 50MHz)
+                    if keyA_press_cnt = to_unsigned(25_000_000, 24) then
                         keyA_long <= '1';
                     end if;
-                else  -- released
-                    -- One-shot event on release
-                    if keyA_prev = '0' then
-                        keyA_event <= '1';
+                else  -- released (keyA_sync = '1')
+                    if keyA_prev = '0' then -- Rising edge of key (Release event)
+                        if keyA_long = '1' then
+                            -- Long press action: Toggle Continuous Mode
+                            keyA_long_mode <= not keyA_long_mode;
+                            show_raw_mode  <= '0'; -- Switch back to distance display
+                        else
+                            -- Short press action: Single Measure
+                            single_measure <= '1';
+                            show_raw_mode  <= '0'; -- Switch back to distance display
+                        end if;
                     end if;
+                    
+                    -- Reset counters on release
                     keyA_press_cnt <= (others => '0');
                     keyA_long      <= '0';
                 end if;
 
-                -- On release event, decide short vs long
-                if keyA_event = '1' then
-                    if keyA_long = '1' then
-                        -- Long press: toggle continuous mode
-                        keyA_long_mode <= not keyA_long_mode;
-                    else
-                        -- Short press: single measurement
-                        null; -- handled below when generating single_measure
-                    end if;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    ----------------------------------------------------------------
-    -- Generate single_measure and continuous_measure
-    ----------------------------------------------------------------
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if reset = '1' then
-                single_measure     <= '0';
-                continuous_measure <= '0';
-            else
-                -- default
-                single_measure <= '0';
-
-                -- continuous mode based on long-mode flag
+                -- 2. Handle Continuous Mode
                 if keyA_long_mode = '1' then
                     continuous_measure <= '1';
                 else
                     continuous_measure <= '0';
                 end if;
 
-                -- Short press of A: when A_event=1 but keyA_long=0
-                if keyA_event = '1' and keyA_long = '0' then
-                    single_measure <= '1';
-                end if;
-
-                -- Short press of B/C: single measurement for calibration
+                -- 3. Handle B and C (Calibration Buttons)
                 if B_press = '1' or C_press = '1' then
                     single_measure <= '1';
+                    show_raw_mode  <= '1'; -- Show raw laser center
                 end if;
+
             end if;
         end if;
     end process;
@@ -317,16 +305,16 @@ begin
     ----------------------------------------------------------------
     -- 7-seg display: segment_led entity
     ----------------------------------------------------------------
+
+    led_value <= resize(laser_center, 16) when show_raw_mode = '1' else distance_value;
+
     my_segment_led: entity work.segment_led
         port map(
             clk      => clk,
             reset    => reset,
-            value_in => distance_value,
+            value_in => led_value, -- Connected to multiplexed signal
             seg_data => seg_data,
             seg_sel  => seg_sel
         );
-
-
-
 
 end architecture;
